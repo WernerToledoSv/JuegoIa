@@ -35,7 +35,7 @@ mini-rts-prototipo/
 - **Unidades:** soldado **300 créditos** (65 de vida, 8 de daño, entrenamiento de 2,2 s); tanque **700 créditos** (170 de vida, 22 de daño, producción de 4,2 s).
 - **Edificios:** cada bando empieza con base central, cuartel y fábrica de tanques como parte del escenario inicial. Construir un cuartel adicional cuesta **800 créditos** y una fábrica adicional **1200 créditos**. La base central inicial es el objetivo principal y no se puede reconstruir.
 - **Preparación y selección:** cuenta regresiva de 30 segundos antes del combate. El jugador puede reposicionar unidades, construir y producir durante ese tiempo; los ataques y la IA enemiga permanecen pausados. Arrastrar el ratón permite seleccionar varias unidades propias dentro de un recuadro; las órdenes de movimiento se distribuyen en una formación sencilla.
-- **Acciones y combate:** el panel muestra la acción actual y el registro conserva las últimas acciones. Las unidades se mueven, persiguen objetivos y aplican daño; el enemigo produce unidades y las envía hacia los edificios del jugador una vez iniciado el combate. Si destruye un edificio, las tropas enemigas buscan y atacan automáticamente el edificio propio más cercano que siga en pie. La partida termina cuando un bando pierde todos sus edificios.
+- **Acciones y combate:** el panel muestra la acción actual y el registro conserva las últimas acciones. Las unidades se mueven, persiguen objetivos y aplican daño; el enemigo produce unidades y las envía hacia los edificios del jugador una vez iniciado el combate. Las tropas enemigas eligen objetivos entre las unidades y edificios del jugador; si uno cae, seleccionan otro al azar. La partida termina cuando un bando pierde todos sus edificios.
 
 Es un prototipo jugable enfocado en la prueba de mecánicas, no una reproducción exacta de Red Alert.
 
@@ -53,3 +53,10 @@ Es un prototipo jugable enfocado en la prueba de mecánicas, no una reproducció
 - Las unidades enemigas atacan edificios del jugador.
 - Cuando destruyen el edificio que tenían como objetivo, seleccionan automáticamente el edificio propio más cercano que siga en pie y continúan el ataque.
 - Si no quedan edificios del jugador, las tropas enemigas se quedan sin objetivos y se activa la condición de derrota.
+
+
+## Preparación y estrategia variable de la IA
+
+- Durante los 30 segundos de preparación, el enemigo también usa sus créditos para producir soldados y tanques; sus tropas permanecen quietas y no infligen daño hasta que termina la cuenta regresiva.
+- Cada partida aleatoriza el intervalo entre decisiones de producción y el límite del ejército enemigo, por lo que la composición y cantidad de refuerzos varían.
+- Las tropas enemigas escogen objetivos aleatorios entre las unidades y edificios del jugador. Cuando el objetivo es destruido, seleccionan otro objetivo válido al azar y continúan atacando.

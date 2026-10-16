@@ -127,6 +127,9 @@
   let commandMode = null, constructionMode = null, pointer = { x: W/2, y: H/2 };
   let logs = [], currentAction = 'Elige un color y comienza.';
   let lastFrame = 0, incomeAccumulator = 0, enemyThink = 0, enemyProductionCounter = 0;
+  // Cada partida genera un ritmo de decisiones y un tamaño de ejército diferentes.
+  let enemyNextThink = 2 + Math.random() * 2.2;
+  let enemyForceLimit = 9 + Math.floor(Math.random() * 5);
 
   const el = id => document.getElementById(id);
   const playerSide = () => 'player';
@@ -154,15 +157,13 @@
     el('currentAction').textContent = message;
   }
   function getById(id) { return units.find(x => x.id === id) || buildings.find(x => x.id === id) || null; }
-  // Selecciona el edificio enemigo vivo más cercano para que la IA no se detenga
-  // cuando su objetivo actual sea destruido.
-  function nearestEnemyBuilding(unit) {
-    return buildings
-      .filter(building => building.hp > 0 && building.side !== unit.side)
-      .sort((a, b) => distance(unit, a) - distance(unit, b))[0] || null;
-  }
   function getEnemies(side) {
     return [...units, ...buildings].filter(o => o.side !== side && o.hp > 0);
+  }
+  // La IA escoge al azar entre tropas y edificios vivos; el objetivo cambia en cada partida.
+  function randomEnemyTarget(unit) {
+    const candidates = getEnemies(unit.side);
+    return candidates.length ? candidates[Math.floor(Math.random() * candidates.length)] : null;
   }
   function createBuilding(side, type, x, y) {
     const def = BUILDING_DATA[type];
@@ -183,7 +184,10 @@
     nextId = 1; playerCredits = 3000; enemyCredits = 3000;
     units = []; buildings = []; selected = null; selectedGroup = []; commandMode = null; constructionMode = null;
     dragSelection = { active: false, moved: false, startX: 0, startY: 0, x: 0, y: 0 };
-    incomeAccumulator = 0; enemyThink = 0; enemyProductionCounter = 0; gameOver = false; logs = [];
+    incomeAccumulator = 0; enemyThink = 0; enemyProductionCounter = 0;
+    enemyNextThink = 1.8 + Math.random() * 2.8;
+    enemyForceLimit = 9 + Math.floor(Math.random() * 5);
+    gameOver = false; logs = [];
     preparing = true; preparationRemaining = PREPARATION_SECONDS;
     const p = playerSide(), e = enemySide();
     createBuilding(p, 'hq', 105, 298);
@@ -196,12 +200,13 @@
     createUnit(p, 'soldier', 330, 278);
     createUnit(p, 'soldier', 348, 307);
     createUnit(p, 'tank', 345, 358);
-    const playerHQ = buildings.find(b => b.side === p && b.type === 'hq');
     for (const enemyUnit of [createUnit(e, 'soldier', 630, 278), createUnit(e, 'soldier', 612, 308), createUnit(e, 'tank', 615, 358)]) {
-      enemyUnit.order = { type: 'attack', targetId: playerHQ.id };
+      const target = randomEnemyTarget(enemyUnit);
+      if (target) enemyUnit.order = { type: 'attack', targetId: target.id };
     }
     started = true;
     addLog('Preparación iniciada: tienes 30 segundos para organizar tu ejército.');
+    addLog('La IA también prepara tropas y elegirá objetivos de forma variable.');
     addLog('Ambos bandos comienzan con 3000 créditos.');
     addLog('Jugador: ' + (playerColor === 'blue' ? 'azul' : 'rojo') + ' · Enemigo: ' + (playerColor === 'blue' ? 'rojo' : 'azul') + '.');
     setAction('Preparación: 30 s. Puedes mover, construir y producir; los ataques se habilitan al finalizar.');
@@ -484,7 +489,7 @@
         const offset = b.side === playerSide() ? 1 : -1;
         const spawned = createUnit(b.side, type, b.x + offset*(b.w/2+25), b.y + b.h/2 + 17);
         if (b.side === enemySide()) {
-          const target = nearestEnemyBuilding(spawned);
+          const target = randomEnemyTarget(spawned);
           if (target) spawned.order = { type: 'attack', targetId: target.id };
         }
         if (b.side === playerSide()) { setAction(`${UNIT_DATA[type].name} listo y desplegado.`); addLog(`${UNIT_DATA[type].name} completado en ${BUILDING_DATA[b.type].name.toLowerCase()}.`); }
@@ -492,17 +497,29 @@
         startNextProduction(b, b.side);
       }
     }
-    if (!preparing) {
-      enemyThink += dt;
-      if (enemyThink >= 3.3) {
-        enemyThink = 0; enemyProductionCounter++;
-        const enemyBarracks = buildings.find(b => b.side === enemySide() && b.type === 'barracks' && b.hp > 0 && !b.production);
-        const enemyFactory = buildings.find(b => b.side === enemySide() && b.type === 'factory' && b.hp > 0 && !b.production);
-        const enemyUnitCount = units.filter(u=>u.side===enemySide()).length;
-        // La IA alterna grupos de soldados con tanques para probar ambos tipos de unidad.
-        if (enemyUnitCount < 12 && enemyProductionCounter % 3 === 0 && enemyFactory && enemyCredits >= UNIT_COST.tank) beginProduction(enemyFactory,'tank',enemySide());
-        else if (enemyUnitCount < 12 && enemyBarracks && enemyCredits >= UNIT_COST.soldier) beginProduction(enemyBarracks,'soldier',enemySide());
-        else if (enemyUnitCount < 12 && enemyFactory && enemyCredits >= UNIT_COST.tank) beginProduction(enemyFactory,'tank',enemySide());
+    // La IA produce durante la preparación y durante el combate.
+    // Alterna decisiones de forma aleatoria y limita también lo que tiene en producción.
+    enemyThink += dt;
+    if (enemyThink >= enemyNextThink) {
+      enemyThink = 0;
+      enemyNextThink = 1.8 + Math.random() * 2.8;
+      enemyProductionCounter++;
+      const enemyBuildings = buildings.filter(b =>
+        b.side === enemySide() && b.hp > 0 && ['barracks', 'factory'].includes(b.type) &&
+        (b.productionQueue || []).length < 50
+      );
+      const deployed = units.filter(u => u.side === enemySide() && u.hp > 0).length;
+      const beingProduced = enemyBuildings.reduce((total, b) =>
+        total + (b.production ? 1 : 0) + (b.productionQueue || []).length, 0);
+      const forceSize = deployed + beingProduced;
+      const productionOptions = enemyBuildings.flatMap(b => {
+        const type = b.type === 'barracks' ? 'soldier' : 'tank';
+        return enemyCredits >= UNIT_COST[type] ? [{ building: b, type }] : [];
+      });
+      if (forceSize < enemyForceLimit && productionOptions.length) {
+        const choice = productionOptions[Math.floor(Math.random() * productionOptions.length)];
+        beginProduction(choice.building, choice.type, enemySide());
+        if (preparing) addLog('El enemigo está reforzando su ejército durante la preparación.');
       }
     }
     // Movimiento, alcance y combate básico: cada orden de ataque persigue su objetivo.
@@ -518,10 +535,9 @@
       } else if (u.order.type === 'attack') {
         let target = getById(u.order.targetId);
         if (!target || target.hp <= 0 || target.side === u.side) {
-          // Las tropas enemigas cambian automáticamente al siguiente edificio propio
-          // más cercano cuando el objetivo actual deja de existir.
+          // Si el objetivo muere o desaparece, la IA elige otra tropa o edificio al azar.
           if (u.side === enemySide()) {
-            target = nearestEnemyBuilding(u);
+            target = randomEnemyTarget(u);
             if (target) {
               u.order = { type: 'attack', targetId: target.id };
               addLog(`El enemigo cambia de objetivo: ahora ataca ${displayName(target)}.`);
