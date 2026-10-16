@@ -154,6 +154,13 @@
     el('currentAction').textContent = message;
   }
   function getById(id) { return units.find(x => x.id === id) || buildings.find(x => x.id === id) || null; }
+  // Selecciona el edificio enemigo vivo más cercano para que la IA no se detenga
+  // cuando su objetivo actual sea destruido.
+  function nearestEnemyBuilding(unit) {
+    return buildings
+      .filter(building => building.hp > 0 && building.side !== unit.side)
+      .sort((a, b) => distance(unit, a) - distance(unit, b))[0] || null;
+  }
   function getEnemies(side) {
     return [...units, ...buildings].filter(o => o.side !== side && o.hp > 0);
   }
@@ -477,7 +484,7 @@
         const offset = b.side === playerSide() ? 1 : -1;
         const spawned = createUnit(b.side, type, b.x + offset*(b.w/2+25), b.y + b.h/2 + 17);
         if (b.side === enemySide()) {
-          const target = buildings.find(x => x.side === playerSide() && x.hp > 0);
+          const target = nearestEnemyBuilding(spawned);
           if (target) spawned.order = { type: 'attack', targetId: target.id };
         }
         if (b.side === playerSide()) { setAction(`${UNIT_DATA[type].name} listo y desplegado.`); addLog(`${UNIT_DATA[type].name} completado en ${BUILDING_DATA[b.type].name.toLowerCase()}.`); }
@@ -509,8 +516,24 @@
         if (d <= u.speed*dt+1) { u.x=u.order.x; u.y=u.order.y; u.order={type:'idle'}; if (selected && selected.id===u.id) { setAction('Unidad llegó al destino.'); addLog('Unidad llegó al destino.'); } }
         else { u.x += (u.order.x-u.x)/d*u.speed*dt; u.y += (u.order.y-u.y)/d*u.speed*dt; }
       } else if (u.order.type === 'attack') {
-        const target = getById(u.order.targetId);
-        if (!target || target.hp <= 0 || target.side === u.side) { u.order={type:'idle'}; continue; }
+        let target = getById(u.order.targetId);
+        if (!target || target.hp <= 0 || target.side === u.side) {
+          // Las tropas enemigas cambian automáticamente al siguiente edificio propio
+          // más cercano cuando el objetivo actual deja de existir.
+          if (u.side === enemySide()) {
+            target = nearestEnemyBuilding(u);
+            if (target) {
+              u.order = { type: 'attack', targetId: target.id };
+              addLog(`El enemigo cambia de objetivo: ahora ataca ${displayName(target)}.`);
+            } else {
+              u.order = { type: 'idle' };
+              continue;
+            }
+          } else {
+            u.order = { type: 'idle' };
+            continue;
+          }
+        }
         const d = distance(u,target);
         const targetRadius = target.kind === 'unit' ? target.radius : Math.max(target.w,target.h)*0.43;
         const reach = u.range + targetRadius*0.25;
