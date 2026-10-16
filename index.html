@@ -1,0 +1,682 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mini RTS — Prototipo clásico</title>
+<style>
+  :root{color-scheme:dark;--bg:#101820;--panel:#1b2932;--line:#49616b;--text:#e9f1f2;--muted:#a9bdc3;--accent:#f0c75e}
+  *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.4 system-ui,Segoe UI,Arial,sans-serif}
+  header{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;padding:12px 16px;background:#0a1117;border-bottom:1px solid var(--line)}
+  h1{font-size:18px;margin:0;letter-spacing:.04em}.stats{display:flex;gap:14px;flex-wrap:wrap;font-weight:700}.stats span{color:var(--accent)}
+  main{display:grid;grid-template-columns:minmax(0,1fr) 285px;gap:12px;padding:12px;max-width:1500px;margin:auto}.board-wrap{min-width:0}
+  canvas{width:100%;height:auto;display:block;border:2px solid var(--line);background:#536a46;cursor:crosshair;touch-action:manipulation}
+  .hint{color:var(--muted);font-size:12px;margin:7px 2px}.hint strong{color:#fff}
+  aside{display:flex;flex-direction:column;gap:10px}.panel{background:var(--panel);border:1px solid var(--line);padding:12px;min-width:0}
+  h2{font-size:13px;text-transform:uppercase;letter-spacing:.08em;margin:0 0 9px;color:var(--accent)}
+  button{width:100%;padding:9px 10px;margin:4px 0;color:var(--text);background:#293c46;border:1px solid #607781;border-radius:3px;font:inherit;cursor:pointer}
+  button:hover:not(:disabled){background:#38515d}button:disabled{opacity:.43;cursor:not-allowed}button.primary{background:#6a5423;border-color:#b18b36}button.active{outline:2px solid var(--accent);background:#42535a}
+  .row{display:flex;gap:8px}.row>*{flex:1}.swatches{display:flex;gap:9px}.swatch{height:30px;border:2px solid #dce5e8;border-radius:3px;flex:1;cursor:pointer}.swatch[aria-pressed="true"]{outline:3px solid var(--accent);outline-offset:2px}
+  .small{color:var(--muted);font-size:12px}.status{font-weight:700;color:#b9f0b1;min-height:20px}#selection{min-height:42px}#actionLog{min-height:78px;max-height:160px;overflow:auto;padding:8px;background:#101920;border:1px solid #354a54;color:#d6e5e8;font-size:12px}
+  .logline{padding:2px 0;border-bottom:1px solid #24343b}.logline:last-child{border-bottom:0}.cost{float:right;color:var(--accent)}
+  @media(max-width:900px){main{grid-template-columns:1fr}aside{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr))}}
+</style>
+</head>
+<body>
+<header>
+  <h1>MINI RTS · PROTOTIPO CLÁSICO</h1>
+  <div class="stats" aria-live="polite">
+    <div>Créditos jugador: <span id="playerCredits">3000</span></div>
+    <div>Créditos enemigo: <span id="enemyCredits">3000</span></div>
+    <div>Ingreso: <span>+100/s por bando</span></div>
+    <div>Unidades: <span id="unitCount">0</span></div>
+    <div>Combate en: <span id="prepCountdown">—</span></div>
+    <div>Estado: <span id="gameState">Configuración</span></div>
+  </div>
+</header>
+<main>
+  <section class="board-wrap">
+    <canvas id="game" width="960" height="600" aria-label="Mapa de juego RTS. Selecciona unidades y edificios con el ratón."></canvas>
+    <p class="hint"><strong>Controles:</strong> clic izquierdo para seleccionar una unidad o edificio; <strong>arrastra el ratón sobre varias unidades propias para seleccionarlas en grupo</strong>; clic derecho en terreno para mover y en un enemigo para atacar. Durante los 30 s de preparación puedes mover, construir y producir; el combate se activa al terminar. Pulsa <strong>Esc</strong> para cancelar.</p>
+  </section>
+  <aside>
+    <section class="panel">
+      <h2>Bando del jugador</h2>
+      <div class="swatches">
+        <button class="swatch" id="blueChoice" style="background:#2196f3" aria-label="Elegir bando azul" aria-pressed="true" title="Azul"></button>
+        <button class="swatch" id="redChoice" style="background:#e74c3c" aria-label="Elegir bando rojo" aria-pressed="false" title="Rojo"></button>
+      </div>
+      <p class="small" id="colorDescription">Jugador: azul · Enemigo: rojo</p>
+      <button class="primary" id="startButton">Comenzar partida</button>
+      <p class="small">Ambos bandos inician con 3000 créditos y las tres estructuras principales.</p>
+    </section>
+    <section class="panel">
+      <h2>Selección</h2>
+      <div id="selection">No hay unidad ni edificio seleccionado.</div>
+      <div class="row"><button id="moveButton">Mover</button><button id="attackButton">Atacar</button></div>
+      <button id="cancelButton">Cancelar orden / modo (Esc)</button>
+      <div class="small" id="selectionHint">Selecciona una unidad o edificio en el mapa.</div>
+    </section>
+    <section class="panel">
+      <h2>Producción</h2>
+      <button id="soldierButton">Producir soldado <span class="cost">300 cr</span></button>
+      <button id="tankButton">Producir tanque <span class="cost">700 cr</span></button>
+      <p class="small">Selecciona un cuartel para entrenar soldados o una fábrica para producir tanques. La producción tarda unos segundos.</p>
+    </section>
+    <section class="panel">
+      <h2>Construcción</h2>
+      <button id="buildBarracksButton">Construir cuartel <span class="cost">800 cr</span></button>
+      <button id="buildFactoryButton">Construir fábrica <span class="cost">1200 cr</span></button>
+      <p class="small">Elige un edificio y luego haz clic en una zona libre del mapa para colocarlo. La base central inicial no se puede construir otra vez.</p>
+    </section>
+    <section class="panel">
+      <h2>Acción actual</h2>
+      <div class="status" id="currentAction">Elige un color y comienza.</div>
+      <h2 style="margin-top:12px">Registro de acciones</h2>
+      <div id="actionLog" aria-live="polite">La partida aún no ha comenzado.</div>
+    </section>
+  </aside>
+</main>
+<script>
+'use strict';
+/*
+ * OPCIÓN MÁS SIMPLE: juego 2D en un único HTML, dibujado con Canvas y JavaScript puro.
+ * No utiliza imágenes, sprites, librerías, red, servidor ni almacenamiento externo.
+ * Fase inicial: 30 segundos de preparación; se puede mover, construir y producir, pero el
+ * combate y la IA enemiga permanecen pausados hasta que termine la cuenta regresiva.
+ * Balance: +100 créditos/segundo por bando permite recuperar una unidad barata cada 3 s,
+ * manteniendo las compras frecuentes pero no instantáneas. Las estructuras iniciales se
+ * entregan como escenario de inicio; cuartel adicional = 800 cr, fábrica adicional = 1200 cr.
+ */
+(() => {
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  const INCOME_PER_SECOND = 100;
+  const UNIT_COST = { soldier: 300, tank: 700 };
+  const BUILDING_COST = { barracks: 800, factory: 1200 };
+  const UNIT_DATA = {
+    soldier: { name: 'Soldado', hp: 65, speed: 58, damage: 8, range: 27, reload: 0.7, radius: 10, trainTime: 2.2 },
+    tank: { name: 'Tanque', hp: 170, speed: 34, damage: 22, range: 62, reload: 1.15, radius: 15, trainTime: 4.2 }
+  };
+  const BUILDING_DATA = {
+    hq: { name: 'Base central', w: 76, h: 72, hp: 620 },
+    barracks: { name: 'Cuartel', w: 66, h: 54, hp: 350 },
+    factory: { name: 'Fábrica de tanques', w: 74, h: 58, hp: 420 }
+  };
+  const SIDE_COLORS = { blue: '#2196f3', red: '#e74c3c' };
+
+  let playerColor = 'blue';
+  let started = false;
+  let preparing = false;
+  const PREPARATION_SECONDS = 30;
+  let preparationRemaining = PREPARATION_SECONDS;
+  let gameOver = false;
+  let nextId = 1;
+  let playerCredits = 3000, enemyCredits = 3000;
+  let units = [], buildings = [], selected = null;
+  // selectedGroup contiene todas las unidades propias actualmente seleccionadas.
+  let selectedGroup = [];
+  let dragSelection = { active: false, moved: false, startX: 0, startY: 0, x: 0, y: 0 };
+  let suppressNextClick = false;
+  let commandMode = null, constructionMode = null, pointer = { x: W/2, y: H/2 };
+  let logs = [], currentAction = 'Elige un color y comienza.';
+  let lastFrame = 0, incomeAccumulator = 0, enemyThink = 0, enemyProductionCounter = 0;
+
+  const el = id => document.getElementById(id);
+  const playerSide = () => 'player';
+  const enemySide = () => 'enemy';
+  const sideColor = side => SIDE_COLORS[side === playerSide() ? playerColor : (playerColor === 'blue' ? 'red' : 'blue')];
+  const sideName = side => side === playerSide() ? 'Jugador' : 'Enemigo';
+  const credits = side => side === playerSide() ? playerCredits : enemyCredits;
+  function setCredits(side, amount) {
+    if (side === playerSide()) playerCredits = amount; else enemyCredits = amount;
+  }
+  function distance(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
+  function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+  function addLog(message) {
+    const time = new Date();
+    logs.unshift(`${time.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'})} — ${message}`);
+    logs = logs.slice(0, 8);
+    el('actionLog').innerHTML = logs.map(line => `<div class="logline">${escapeHtml(line)}</div>`).join('');
+    if (logs.length === 0) el('actionLog').textContent = 'Sin acciones todavía.';
+  }
+  function escapeHtml(value) {
+    return String(value).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+  }
+  function setAction(message) {
+    currentAction = message;
+    el('currentAction').textContent = message;
+  }
+  function getById(id) { return units.find(x => x.id === id) || buildings.find(x => x.id === id) || null; }
+  function getEnemies(side) {
+    return [...units, ...buildings].filter(o => o.side !== side && o.hp > 0);
+  }
+  function createBuilding(side, type, x, y) {
+    const def = BUILDING_DATA[type];
+    const building = { id: nextId++, kind: 'building', side, type, x, y, w: def.w, h: def.h,
+      hp: def.hp, maxHp: def.hp, production: null, selected: false };
+    buildings.push(building);
+    return building;
+  }
+  function createUnit(side, type, x, y) {
+    const def = UNIT_DATA[type];
+    const unit = { id: nextId++, kind: 'unit', side, type, x, y, hp: def.hp, maxHp: def.hp,
+      speed: def.speed, damage: def.damage, range: def.range, reload: def.reload, radius: def.radius,
+      cooldown: 0, order: { type: 'idle' }, selected: false };
+    units.push(unit);
+    return unit;
+  }
+  function initializeGame() {
+    nextId = 1; playerCredits = 3000; enemyCredits = 3000;
+    units = []; buildings = []; selected = null; selectedGroup = []; commandMode = null; constructionMode = null;
+    dragSelection = { active: false, moved: false, startX: 0, startY: 0, x: 0, y: 0 };
+    incomeAccumulator = 0; enemyThink = 0; enemyProductionCounter = 0; gameOver = false; logs = [];
+    preparing = true; preparationRemaining = PREPARATION_SECONDS;
+    const p = playerSide(), e = enemySide();
+    createBuilding(p, 'hq', 105, 298);
+    createBuilding(p, 'barracks', 235, 204);
+    createBuilding(p, 'factory', 235, 410);
+    createBuilding(e, 'hq', 855, 298);
+    createBuilding(e, 'barracks', 725, 204);
+    createBuilding(e, 'factory', 725, 410);
+    // Un pequeño grupo inicial hace que movimiento/ataque puedan probarse de inmediato.
+    createUnit(p, 'soldier', 330, 278);
+    createUnit(p, 'soldier', 348, 307);
+    createUnit(p, 'tank', 345, 358);
+    const playerHQ = buildings.find(b => b.side === p && b.type === 'hq');
+    for (const enemyUnit of [createUnit(e, 'soldier', 630, 278), createUnit(e, 'soldier', 612, 308), createUnit(e, 'tank', 615, 358)]) {
+      enemyUnit.order = { type: 'attack', targetId: playerHQ.id };
+    }
+    started = true;
+    addLog('Preparación iniciada: tienes 30 segundos para organizar tu ejército.');
+    addLog('Ambos bandos comienzan con 3000 créditos.');
+    addLog('Jugador: ' + (playerColor === 'blue' ? 'azul' : 'rojo') + ' · Enemigo: ' + (playerColor === 'blue' ? 'rojo' : 'azul') + '.');
+    setAction('Preparación: 30 s. Puedes mover, construir y producir; los ataques se habilitan al finalizar.');
+    el('startButton').textContent = 'Volver a configuración';
+    updateControls();
+  }
+  function returnToSetup() {
+    started = false; preparing = false; preparationRemaining = PREPARATION_SECONDS; gameOver = false; selected = null; selectedGroup = []; commandMode = null; constructionMode = null;
+    dragSelection = { active: false, moved: false, startX: 0, startY: 0, x: 0, y: 0 };
+    units = []; buildings = []; logs = []; playerCredits = 3000; enemyCredits = 3000;
+    el('actionLog').textContent = 'La partida aún no ha comenzado.';
+    el('startButton').textContent = 'Comenzar partida';
+    setAction('Elige un color y comienza.');
+    updateControls();
+  }
+  function chooseColor(color) {
+    if (started) return;
+    playerColor = color;
+    el('blueChoice').setAttribute('aria-pressed', String(color === 'blue'));
+    el('redChoice').setAttribute('aria-pressed', String(color === 'red'));
+    el('colorDescription').textContent = `Jugador: ${color === 'blue' ? 'azul' : 'rojo'} · Enemigo: ${color === 'blue' ? 'rojo' : 'azul'}`;
+    render();
+  }
+  function updateControls() {
+    const selectedUnits = getSelectedPlayerUnits();
+    const ownBuilding = selected && selected.kind === 'building' && selected.side === playerSide();
+    const canSoldier = ownBuilding && selected.type === 'barracks';
+    const canTank = ownBuilding && selected.type === 'factory';
+    el('soldierButton').disabled = !started || gameOver || !canSoldier || !!(selected && selected.production);
+    el('tankButton').disabled = !started || gameOver || !canTank || !!(selected && selected.production);
+    el('moveButton').disabled = !started || gameOver || selectedUnits.length === 0;
+    el('attackButton').disabled = !started || preparing || gameOver || selectedUnits.length === 0;
+    el('cancelButton').disabled = !started || gameOver || (!commandMode && !constructionMode && !selectedUnits.some(u => u.order.type !== 'idle'));
+    el('buildBarracksButton').disabled = !started || gameOver;
+    el('buildFactoryButton').disabled = !started || gameOver;
+    el('blueChoice').disabled = started;
+    el('redChoice').disabled = started;
+    el('startButton').disabled = false;
+    el('moveButton').classList.toggle('active', commandMode === 'move');
+    el('attackButton').classList.toggle('active', commandMode === 'attack');
+    el('prepCountdown').textContent = !started ? '—' : preparing ? `${Math.ceil(preparationRemaining)} s` : 'Completada';
+    if (!started) {
+      el('selection').textContent = 'No hay unidad ni edificio seleccionado.';
+      el('selectionHint').textContent = 'Elige un color y comienza la partida.';
+    } else if (selectedUnits.length > 1) {
+      const soldiers = selectedUnits.filter(u => u.type === 'soldier').length;
+      const tanks = selectedUnits.filter(u => u.type === 'tank').length;
+      el('selection').textContent = `Grupo seleccionado: ${selectedUnits.length} unidades`;
+      el('selectionHint').textContent = `${soldiers} soldado(s) · ${tanks} tanque(s). Las órdenes de movimiento y ataque se aplican a todo el grupo.`;
+    } else if (!selected) {
+      el('selection').textContent = 'No hay unidad ni edificio seleccionado.';
+      el('selectionHint').textContent = 'Selecciona una unidad o edificio en el mapa.';
+    } else if (selected.kind === 'unit') {
+      el('selection').textContent = `${selected.side === playerSide() ? 'Tu' : 'Unidad enemiga'}: ${UNIT_DATA[selected.type].name} · Vida ${Math.max(0, Math.ceil(selected.hp))}/${selected.maxHp}`;
+      el('selectionHint').textContent = selected.side === playerSide() ? orderDescription(selected) : 'Unidad controlada por el enemigo.';
+    } else {
+      const prod = selected.production ? ` · Produciendo: ${UNIT_DATA[selected.production.type].name} (${Math.ceil(selected.production.remaining)} s)` : '';
+      el('selection').textContent = `${selected.side === playerSide() ? 'Tu' : 'Enemigo'}: ${BUILDING_DATA[selected.type].name} · Vida ${Math.max(0, Math.ceil(selected.hp))}/${selected.maxHp}${prod}`;
+      el('selectionHint').textContent = selected.type === 'barracks' ? 'El cuartel entrena soldados.' : selected.type === 'factory' ? 'La fábrica produce tanques.' : 'La base central es el objetivo principal.';
+    }
+    el('playerCredits').textContent = Math.floor(playerCredits).toString();
+    el('enemyCredits').textContent = Math.floor(enemyCredits).toString();
+    el('unitCount').textContent = units.filter(u => u.side === playerSide()).length.toString();
+    el('gameState').textContent = !started ? 'Configuración' : gameOver ? (buildings.some(b => b.side === playerSide() && b.type === 'hq' && b.hp > 0) ? 'Victoria' : 'Derrota') : preparing ? 'Preparación' : 'En marcha';
+  }
+  function getSelectedPlayerUnits() {
+    return selectedGroup.filter(u => u && u.kind === 'unit' && u.side === playerSide() && u.hp > 0 && units.some(live => live.id === u.id));
+  }
+  function orderDescription(unit) {
+    if (unit.order.type === 'move') return 'Orden actual: Moviendo unidad.';
+    if (unit.order.type === 'attack') return 'Orden actual: Atacando objetivo.';
+    return 'Sin órdenes activas.';
+  }
+  function selectedOrderText() {
+    if (!selected || selected.kind !== 'unit' || selected.side !== playerSide()) return '';
+    if (selected.order.type === 'move') return 'Moviendo unidad';
+    if (selected.order.type === 'attack') return 'Atacando';
+    return '';
+  }
+  function issueMove(unitsOrUnit, x, y) {
+    const group = (Array.isArray(unitsOrUnit) ? unitsOrUnit : [unitsOrUnit]).filter(u => u && u.kind === 'unit' && u.side === playerSide() && u.hp > 0);
+    if (!group.length) return;
+    // Formación sencilla en cuadrícula para que las unidades no intenten ocupar el mismo punto.
+    const columns = Math.ceil(Math.sqrt(group.length));
+    const rows = Math.ceil(group.length / columns);
+    group.forEach((unit, index) => {
+      const col = index % columns, row = Math.floor(index / columns);
+      const offsetX = (col - (columns - 1) / 2) * 22;
+      const offsetY = (row - (rows - 1) / 2) * 22;
+      unit.order = { type: 'move', x: clamp(x + offsetX, 14, W-14), y: clamp(y + offsetY, 14, H-14) };
+    });
+    const message = group.length > 1 ? `Moviendo grupo: ${group.length} unidades.` : 'Moviendo unidad: ' + UNIT_DATA[group[0].type].name.toLowerCase() + '.';
+    setAction(message); addLog(message); commandMode = null; constructionMode = null; updateControls();
+  }
+  function issueAttack(unitsOrUnit, target) {
+    const group = (Array.isArray(unitsOrUnit) ? unitsOrUnit : [unitsOrUnit]).filter(u => u && u.kind === 'unit' && u.side === playerSide() && u.hp > 0);
+    if (!group.length) return;
+    if (preparing) { setAction('El ataque estará disponible cuando termine la preparación.'); return; }
+    if (!target || target.side === playerSide()) {
+      setAction('Selecciona una unidad o edificio enemigo para atacar.'); return;
+    }
+    group.forEach(unit => { unit.order = { type: 'attack', targetId: target.id }; });
+    const message = group.length > 1 ? `Atacando: grupo de ${group.length} unidades contra ${displayName(target)}.` : 'Atacando: ' + displayName(target) + '.';
+    setAction(message); addLog(message); commandMode = null; constructionMode = null; updateControls();
+  }
+  function displayName(o) { return o.kind === 'unit' ? UNIT_DATA[o.type].name.toLowerCase() : BUILDING_DATA[o.type].name.toLowerCase(); }
+  function beginProduction(building, type, side) {
+    if (!building || building.kind !== 'building' || building.type !== (type === 'soldier' ? 'barracks' : 'factory')) return;
+    if (building.production) {
+      if (side === playerSide()) { setAction('Este edificio ya está produciendo una unidad.'); addLog('Producción rechazada: el edificio está ocupado.'); }
+      return;
+    }
+    const cost = UNIT_COST[type];
+    if (credits(side) < cost) {
+      if (side === playerSide()) {
+        const message = `Créditos insuficientes para producir ${UNIT_DATA[type].name.toLowerCase()}: necesitas ${cost} y tienes ${Math.floor(playerCredits)}.`;
+        setAction(message); addLog(message);
+      }
+      updateControls(); return;
+    }
+    setCredits(side, credits(side) - cost);
+    building.production = { type, remaining: UNIT_DATA[type].trainTime, total: UNIT_DATA[type].trainTime };
+    const message = `Construyendo ${type === 'tank' ? 'tanque' : 'soldado'}${side === enemySide() ? ' (enemigo)' : ''}.`;
+    if (side === playerSide()) { setAction(message); addLog(`${message} Coste: ${cost} créditos.`); }
+  }
+  function beginConstruction(type) {
+    if (!started || gameOver) return;
+    const cost = BUILDING_COST[type];
+    if (playerCredits < cost) {
+      const message = `Créditos insuficientes para construir ${BUILDING_DATA[type].name.toLowerCase()}: necesitas ${cost} y tienes ${Math.floor(playerCredits)}.`;
+      setAction(message); addLog(message); return;
+    }
+    constructionMode = type; commandMode = null;
+    const message = `Construir ${BUILDING_DATA[type].name.toLowerCase()}: haz clic en una zona libre del mapa.`;
+    setAction(message); addLog(message); updateControls();
+  }
+  function buildingAt(x, y) {
+    return [...buildings].reverse().find(b => b.hp > 0 && x >= b.x-b.w/2 && x <= b.x+b.w/2 && y >= b.y-b.h/2 && y <= b.y+b.h/2) || null;
+  }
+  function unitAt(x, y) {
+    return [...units].reverse().find(u => u.hp > 0 && Math.hypot(x-u.x, y-u.y) <= u.radius+5) || null;
+  }
+  function objectAt(x, y) { return unitAt(x,y) || buildingAt(x,y); }
+  function selectObject(obj) {
+    for (const item of [...units, ...buildings]) item.selected = false;
+    selected = obj;
+    selectedGroup = obj && obj.kind === 'unit' && obj.side === playerSide() ? [obj] : [];
+    if (selected) selected.selected = true;
+    commandMode = null;
+    updateControls();
+    if (obj) setAction(`${obj.side === playerSide() ? 'Seleccionado' : 'Enemigo seleccionado'}: ${displayName(obj)}.`);
+  }
+  function selectUnitsInRectangle(x1, y1, x2, y2) {
+    const left = Math.min(x1, x2), right = Math.max(x1, x2);
+    const top = Math.min(y1, y2), bottom = Math.max(y1, y2);
+    for (const item of [...units, ...buildings]) item.selected = false;
+    selectedGroup = units.filter(u => u.side === playerSide() && u.hp > 0 && u.x >= left && u.x <= right && u.y >= top && u.y <= bottom);
+    selected = selectedGroup[0] || null;
+    for (const unit of selectedGroup) unit.selected = true;
+    commandMode = null;
+    if (selectedGroup.length) {
+      const message = `Seleccionadas ${selectedGroup.length} unidades.`;
+      setAction(message); addLog(message);
+    } else {
+      setAction('No hay unidades propias dentro del recuadro.');
+    }
+    updateControls();
+  }
+  function canvasPoint(event) {
+    const rect = canvas.getBoundingClientRect();
+    return { x: (event.clientX - rect.left) * W / rect.width, y: (event.clientY - rect.top) * H / rect.height };
+  }
+  function canPlaceBuilding(type, x, y) {
+    const def = BUILDING_DATA[type];
+    const margin = 18;
+    if (x - def.w/2 < margin || x + def.w/2 > W-margin || y - def.h/2 < margin || y + def.h/2 > H-margin) return false;
+    return !buildings.some(b => b.hp > 0 && Math.abs(x-b.x) < (def.w+b.w)/2+18 && Math.abs(y-b.y) < (def.h+b.h)/2+18);
+  }
+  function placeBuilding(type, x, y) {
+    const cost = BUILDING_COST[type];
+    if (playerCredits < cost) {
+      setAction(`Créditos insuficientes: necesitas ${cost} para construir el edificio.`); addLog('Construcción cancelada por falta de créditos.'); constructionMode = null; return;
+    }
+    if (!canPlaceBuilding(type,x,y)) {
+      setAction('Zona ocupada o fuera del mapa. Elige otra ubicación.'); return;
+    }
+    playerCredits -= cost;
+    const b = createBuilding(playerSide(), type, x, y);
+    selectObject(b); constructionMode = null;
+    const message = `Construido: ${BUILDING_DATA[type].name.toLowerCase()} (-${cost} créditos).`;
+    setAction(message); addLog(message); updateControls();
+  }
+  function onCanvasClick(event) {
+    if (suppressNextClick) { suppressNextClick = false; return; }
+    if (!started || gameOver) return;
+    const { x, y } = canvasPoint(event);
+    if (constructionMode) { placeBuilding(constructionMode, x, y); return; }
+    const hit = objectAt(x,y);
+    const group = getSelectedPlayerUnits();
+    if (commandMode === 'move') {
+      if (group.length) issueMove(group,x,y);
+      else setAction('Selecciona una o varias unidades propias antes de ordenar movimiento.');
+      render(); return;
+    }
+    if (commandMode === 'attack') {
+      if (preparing) setAction('El ataque estará disponible cuando termine la preparación.');
+      else if (group.length) issueAttack(group,hit);
+      else setAction('Selecciona una o varias unidades propias antes de ordenar un ataque.');
+      render(); return;
+    }
+    selectObject(hit);
+    render();
+  }
+  function onCanvasContext(event) {
+    event.preventDefault();
+    if (!started || gameOver) return;
+    const group = getSelectedPlayerUnits();
+    if (!group.length) { setAction('Selecciona una o varias unidades propias para dar órdenes.'); return; }
+    const { x, y } = canvasPoint(event);
+    const hit = objectAt(x,y);
+    if (hit && hit.side !== playerSide()) issueAttack(group,hit);
+    else issueMove(group,x,y);
+    render();
+  }
+  function update(dt) {
+    if (!started || gameOver) return;
+    if (preparing) {
+      preparationRemaining = Math.max(0, preparationRemaining - dt);
+      if (preparationRemaining <= 0) {
+        preparing = false;
+        setAction('¡Combate iniciado! Ataca la base central enemiga.');
+        addLog('Fin de la preparación: comienza el combate.');
+      }
+    }
+    incomeAccumulator += dt;
+    while (incomeAccumulator >= 1) {
+      playerCredits += INCOME_PER_SECOND; enemyCredits += INCOME_PER_SECOND; incomeAccumulator -= 1;
+    }
+    // Producción temporizada de ambos bandos.
+    for (const b of buildings) {
+      if (!b.production || b.hp <= 0) continue;
+      b.production.remaining -= dt;
+      if (b.production.remaining <= 0) {
+        const type = b.production.type;
+        const offset = b.side === playerSide() ? 1 : -1;
+        const spawned = createUnit(b.side, type, b.x + offset*(b.w/2+25), b.y + b.h/2 + 17);
+        if (b.side === enemySide()) {
+          const target = buildings.find(x => x.side === playerSide() && x.type === 'hq' && x.hp > 0);
+          if (target) spawned.order = { type: 'attack', targetId: target.id };
+        }
+        if (b.side === playerSide()) { setAction(`${UNIT_DATA[type].name} listo. ${type === 'tank' ? 'Tanque' : 'Soldado'} desplegado.`); addLog(`${UNIT_DATA[type].name} completado en ${BUILDING_DATA[b.type].name.toLowerCase()}.`); }
+        b.production = null;
+      }
+    }
+    if (!preparing) {
+      enemyThink += dt;
+      if (enemyThink >= 3.3) {
+        enemyThink = 0; enemyProductionCounter++;
+        const enemyBarracks = buildings.find(b => b.side === enemySide() && b.type === 'barracks' && b.hp > 0 && !b.production);
+        const enemyFactory = buildings.find(b => b.side === enemySide() && b.type === 'factory' && b.hp > 0 && !b.production);
+        const enemyUnitCount = units.filter(u=>u.side===enemySide()).length;
+        // La IA alterna grupos de soldados con tanques para probar ambos tipos de unidad.
+        if (enemyUnitCount < 12 && enemyProductionCounter % 3 === 0 && enemyFactory && enemyCredits >= UNIT_COST.tank) beginProduction(enemyFactory,'tank',enemySide());
+        else if (enemyUnitCount < 12 && enemyBarracks && enemyCredits >= UNIT_COST.soldier) beginProduction(enemyBarracks,'soldier',enemySide());
+        else if (enemyUnitCount < 12 && enemyFactory && enemyCredits >= UNIT_COST.tank) beginProduction(enemyFactory,'tank',enemySide());
+      }
+    }
+    // Movimiento, alcance y combate básico: cada orden de ataque persigue su objetivo.
+    for (const u of units) {
+      if (u.hp <= 0) continue;
+      // Durante la preparación el enemigo permanece inactivo y nadie inflige daño.
+      if (preparing && (u.side === enemySide() || u.order.type === 'attack')) continue;
+      u.cooldown = Math.max(0,u.cooldown-dt);
+      if (u.order.type === 'move') {
+        const d = Math.hypot(u.order.x-u.x,u.order.y-u.y);
+        if (d <= u.speed*dt+1) { u.x=u.order.x; u.y=u.order.y; u.order={type:'idle'}; if (selected && selected.id===u.id) { setAction('Unidad llegó al destino.'); addLog('Unidad llegó al destino.'); } }
+        else { u.x += (u.order.x-u.x)/d*u.speed*dt; u.y += (u.order.y-u.y)/d*u.speed*dt; }
+      } else if (u.order.type === 'attack') {
+        const target = getById(u.order.targetId);
+        if (!target || target.hp <= 0 || target.side === u.side) { u.order={type:'idle'}; continue; }
+        const d = distance(u,target);
+        const targetRadius = target.kind === 'unit' ? target.radius : Math.max(target.w,target.h)*0.43;
+        const reach = u.range + targetRadius*0.25;
+        if (d > reach) {
+          const move = Math.max(0,d-reach);
+          if (d > 0) { u.x += (target.x-u.x)/d*Math.min(u.speed*dt,move); u.y += (target.y-u.y)/d*Math.min(u.speed*dt,move); }
+        } else if (u.cooldown <= 0) {
+          target.hp -= u.damage; u.cooldown = u.reload;
+          if (selected && selected.id===u.id) setAction('Atacando: ' + displayName(target) + '.');
+          if (target.hp <= 0) {
+            if (selected && selected.id===target.id) selectObject(null);
+            addLog(`${sideName(u.side)} destruyó ${displayName(target)}.`);
+            if (target.kind==='building' && target.type==='hq') {
+              gameOver=true;
+              const won=u.side===playerSide();
+              setAction(won?'Victoria: destruiste la base central enemiga.':'Derrota: tu base central fue destruida.');
+              addLog(won?'Victoria.':'Derrota.');
+            }
+          }
+        }
+      }
+      u.x = clamp(u.x,12,W-12); u.y=clamp(u.y,12,H-12);
+    }
+    units = units.filter(u=>u.hp>0);
+    buildings = buildings.filter(b=>b.hp>0);
+    if (selected && selected.kind === 'unit' && selected.side === playerSide()) {
+      selectedGroup = selectedGroup.filter(u => units.some(live => live.id === u.id));
+      selected = selectedGroup[0] || null;
+      if (selected) for (const unit of selectedGroup) unit.selected = true;
+    } else if (selected && selected.kind === 'unit' && !units.some(o=>o.id===selected.id)) {
+      selectObject(null);
+    } else if (selected && selected.kind === 'building' && !buildings.some(o=>o.id===selected.id)) {
+      selectObject(null);
+    }
+    if (selected && selected.kind === 'unit' && selected.side === playerSide() && selected.order.type === 'attack') {
+      const target=getById(selected.order.targetId); if (target && target.hp>0) setAction(selectedGroup.length > 1 ? `Atacando: grupo de ${selectedGroup.length} unidades.` : 'Atacando: '+displayName(target)+'.');
+    } else if (selected && selected.kind === 'unit' && selected.side === playerSide() && selected.order.type === 'move') {
+      setAction(selectedGroup.length > 1 ? `Moviendo grupo: ${selectedGroup.length} unidades.` : 'Moviendo unidad.');
+    }
+    updateControls();
+  }
+  function drawBackground() {
+    ctx.fillStyle='#566c45'; ctx.fillRect(0,0,W,H);
+    // Campos geométricos alternos y cuadrícula ligera.
+    for (let y=0;y<H;y+=48) for (let x=0;x<W;x+=48) {
+      if (((x/48)+(y/48))%2===0) { ctx.fillStyle='rgba(25,52,34,.12)'; ctx.fillRect(x,y,48,48); }
+    }
+    ctx.strokeStyle='rgba(215,226,178,.12)'; ctx.lineWidth=1;
+    for(let x=0;x<=W;x+=48){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,H);ctx.stroke();}
+    for(let y=0;y<=H;y+=48){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke();}
+    // Camino central, sin imágenes ni texturas externas.
+    ctx.fillStyle='#8a805c'; ctx.fillRect(0,470,W,34);
+    ctx.fillStyle='#a59a70'; ctx.fillRect(0,472,W,3); ctx.fillRect(0,499,W,2);
+    for(let x=14;x<W;x+=42){ctx.fillStyle='#645f48';ctx.fillRect(x,486,21,2);}
+    // Charcos/piedras dibujados como elipses y polígonos, fuera de las bases.
+    ctx.fillStyle='#425e57'; ctx.beginPath();ctx.ellipse(485,95,76,31,-.15,0,Math.PI*2);ctx.fill();
+    ctx.strokeStyle='#79917a';ctx.lineWidth=3;ctx.stroke();
+    for(const [x,y,r] of [[420,150,8],[455,145,5],[530,145,7],[560,530,8],[390,530,5],[585,525,6]]){
+      ctx.fillStyle='#7e8667';ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.fill();
+    }
+    ctx.fillStyle='rgba(0,0,0,.22)';ctx.font='bold 12px system-ui';ctx.textAlign='center';
+    ctx.fillText('SECTOR DEL JUGADOR',160,28);ctx.fillText('SECTOR ENEMIGO',800,28);
+  }
+  function drawHealthBar(x,y,w,hp,maxHp) {
+    const ratio=clamp(hp/maxHp,0,1);ctx.fillStyle='#1b2425';ctx.fillRect(x-w/2,y,w,5);
+    ctx.fillStyle=ratio>.5?'#72dc74':ratio>.25?'#edc653':'#ef665d';ctx.fillRect(x-w/2+1,y+1,(w-2)*ratio,3);
+  }
+  function drawBuilding(b) {
+    const color=sideColor(b.side), x=b.x, y=b.y, w=b.w, h=b.h;
+    ctx.save();
+    if (b.selected) {ctx.strokeStyle='#ffe17a';ctx.lineWidth=3;ctx.strokeRect(x-w/2-5,y-h/2-5,w+10,h+10);}
+    ctx.fillStyle='rgba(0,0,0,.25)';ctx.fillRect(x-w/2+4,y-h/2+7,w,h);
+    ctx.fillStyle='#303b3c';ctx.strokeStyle='#c4d2d2';ctx.lineWidth=2;
+    if (b.type==='hq') {
+      ctx.fillRect(x-w/2,y-h/2,w,h);ctx.strokeRect(x-w/2,y-h/2,w,h);
+      ctx.fillStyle=color;ctx.fillRect(x-w/2+8,y-h/2+8,w-16,h-16);
+      ctx.fillStyle='#dce5df';ctx.fillRect(x-11,y-16,22,32);ctx.fillRect(x-22,y-7,44,14);
+      ctx.fillStyle='#253337';ctx.fillRect(x-4,y-28,8,13);ctx.beginPath();ctx.arc(x,y-29,5,0,Math.PI*2);ctx.fill();
+    } else if (b.type==='barracks') {
+      ctx.fillStyle='#384449';ctx.fillRect(x-w/2,y-h/2,w,h);ctx.strokeRect(x-w/2,y-h/2,w,h);
+      ctx.fillStyle=color;ctx.fillRect(x-w/2+5,y-h/2+5,w-10,13);
+      ctx.fillStyle='#e6ece5';ctx.fillRect(x-14,y-2,28,25);ctx.fillStyle='#1b2529';ctx.fillRect(x-8,y+4,16,19);
+      ctx.fillStyle='#e6ece5';ctx.font='bold 13px system-ui';ctx.textAlign='center';ctx.fillText('S',x,y-8);
+    } else {
+      ctx.fillStyle='#3a474a';ctx.beginPath();ctx.moveTo(x-w/2+6,y-h/2);ctx.lineTo(x+w/2-6,y-h/2);ctx.lineTo(x+w/2,y-h/2+9);ctx.lineTo(x+w/2,y+h/2-9);ctx.lineTo(x+w/2-6,y+h/2);ctx.lineTo(x-w/2+6,y+h/2);ctx.lineTo(x-w/2,y+h/2-9);ctx.lineTo(x-w/2,y-h/2+9);ctx.closePath();ctx.fill();ctx.stroke();
+      ctx.fillStyle=color;ctx.fillRect(x-w/2+8,y-h/2+7,w-16,12);
+      ctx.fillStyle='#dce6e5';ctx.fillRect(x-16,y-3,32,20);ctx.fillRect(x-7,y-12,14,14);
+      ctx.fillStyle='#283337';ctx.fillRect(x+4,y-9,23,5);
+    }
+    drawHealthBar(x,y-h/2-11,w,b.hp,b.maxHp);
+    ctx.font='bold 11px system-ui';ctx.textAlign='center';ctx.lineWidth=3;ctx.strokeStyle='#15201d';ctx.strokeText(BUILDING_DATA[b.type].name,x,y+h/2+14);ctx.fillStyle='#fff';ctx.fillText(BUILDING_DATA[b.type].name,x,y+h/2+14);
+    if (b.production) {
+      const width=w-10, ratio=1-b.production.remaining/b.production.total;
+      ctx.fillStyle='#172126';ctx.fillRect(x-width/2,y+h/2+19,width,5);ctx.fillStyle='#f0c75e';ctx.fillRect(x-width/2,y+h/2+19,width*clamp(ratio,0,1),5);
+    }
+    ctx.restore();
+  }
+  function drawUnit(u) {
+    const color=sideColor(u.side);ctx.save();
+    if (u.selected) {ctx.strokeStyle='#ffe17a';ctx.lineWidth=2.5;ctx.beginPath();ctx.ellipse(u.x,u.y,u.radius+7,u.radius+7,0,0,Math.PI*2);ctx.stroke();}
+    if (u.type==='soldier') {
+      ctx.fillStyle='rgba(0,0,0,.28)';ctx.beginPath();ctx.ellipse(u.x+2,u.y+4,11,8,0,0,Math.PI*2);ctx.fill();
+      ctx.fillStyle=color;ctx.strokeStyle='#eff4ed';ctx.lineWidth=1.5;ctx.beginPath();ctx.arc(u.x,u.y,u.radius,0,Math.PI*2);ctx.fill();ctx.stroke();
+      ctx.fillStyle='#dce6de';ctx.beginPath();ctx.arc(u.x,u.y-2,5,Math.PI,Math.PI*2);ctx.fill();
+      ctx.strokeStyle='#172329';ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(u.x+3,u.y+2);ctx.lineTo(u.x+14,u.y+5);ctx.stroke();
+      ctx.fillStyle='#fff';ctx.font='bold 9px system-ui';ctx.textAlign='center';ctx.fillText('S',u.x,u.y+3);
+    } else {
+      ctx.fillStyle='#263237';ctx.fillRect(u.x-15,u.y-9,30,18);ctx.strokeStyle='#e0e7df';ctx.lineWidth=1.5;ctx.strokeRect(u.x-15,u.y-9,30,18);
+      ctx.fillStyle=color;ctx.fillRect(u.x-10,u.y-7,20,14);
+      ctx.fillStyle='#dce6e1';ctx.beginPath();ctx.arc(u.x,u.y,6,0,Math.PI*2);ctx.fill();ctx.fillRect(u.x+2,u.y-2,18,4);
+      ctx.fillStyle='#172329';ctx.fillRect(u.x-12,u.y+9,24,3);
+      ctx.fillStyle='#fff';ctx.font='bold 9px system-ui';ctx.textAlign='center';ctx.fillText('T',u.x,u.y+3);
+    }
+    drawHealthBar(u.x,u.y-u.radius-9,u.radius*2+8,u.hp,u.maxHp);
+    if (u.order.type==='move') {ctx.strokeStyle='#f7e8a3';ctx.setLineDash([3,3]);ctx.beginPath();ctx.moveTo(u.x,u.y);ctx.lineTo(u.order.x,u.order.y);ctx.stroke();ctx.setLineDash([]);ctx.beginPath();ctx.arc(u.order.x,u.order.y,5,0,Math.PI*2);ctx.stroke();}
+    if (u.order.type==='attack') {const target=getById(u.order.targetId);if(target){ctx.strokeStyle='#ffb3a9';ctx.setLineDash([4,4]);ctx.beginPath();ctx.moveTo(u.x,u.y);ctx.lineTo(target.x,target.y);ctx.stroke();ctx.setLineDash([]);}}
+    ctx.restore();
+  }
+  function render() {
+    drawBackground();
+    // La línea de separación visual identifica ambos sectores sin limitar el movimiento.
+    ctx.strokeStyle='rgba(243,238,188,.4)';ctx.setLineDash([5,8]);ctx.beginPath();ctx.moveTo(480,22);ctx.lineTo(480,575);ctx.stroke();ctx.setLineDash([]);
+    for (const b of buildings) drawBuilding(b);
+    for (const u of units) drawUnit(u);
+    if (dragSelection.active && dragSelection.moved) {
+      const left = Math.min(dragSelection.startX, dragSelection.x), top = Math.min(dragSelection.startY, dragSelection.y);
+      const width = Math.abs(dragSelection.x-dragSelection.startX), height = Math.abs(dragSelection.y-dragSelection.startY);
+      ctx.fillStyle = 'rgba(94, 207, 239, .18)'; ctx.fillRect(left,top,width,height);
+      ctx.strokeStyle = '#8de8ff'; ctx.lineWidth = 1.5; ctx.setLineDash([6,3]); ctx.strokeRect(left,top,width,height); ctx.setLineDash([]);
+    }
+    if (!started) {
+      ctx.fillStyle='rgba(8,15,18,.76)';ctx.fillRect(180,210,600,168);
+      ctx.strokeStyle='#b4c6c3';ctx.lineWidth=2;ctx.strokeRect(180,210,600,168);
+      ctx.fillStyle='#fff';ctx.textAlign='center';ctx.font='bold 26px system-ui';ctx.fillText('MINI RTS',480,255);
+      ctx.font='16px system-ui';ctx.fillText('Elige azul o rojo y pulsa “Comenzar partida”',480,291);
+      ctx.font='13px system-ui';ctx.fillStyle='#cedbd7';ctx.fillText('Canvas + JavaScript · geometría y texto · sin recursos externos',480,322);
+      const col=sideColor(playerSide());ctx.fillStyle=col;ctx.fillRect(445,341,70,7);
+    } else if (constructionMode) {
+      const def=BUILDING_DATA[constructionMode];ctx.save();ctx.globalAlpha=.65;ctx.setLineDash([5,4]);ctx.strokeStyle=canPlaceBuilding(constructionMode,pointer.x,pointer.y)?'#fff17a':'#ff7468';ctx.lineWidth=3;ctx.strokeRect(pointer.x-def.w/2,pointer.y-def.h/2,def.w,def.h);ctx.setLineDash([]);ctx.restore();
+    }
+    if (preparing && started && !gameOver) {
+      ctx.fillStyle='rgba(8,15,18,.84)'; ctx.fillRect(325,42,310,58);
+      ctx.strokeStyle='#f0c75e'; ctx.lineWidth=2; ctx.strokeRect(325,42,310,58);
+      ctx.fillStyle='#f0c75e'; ctx.textAlign='center'; ctx.font='bold 17px system-ui'; ctx.fillText('FASE DE PREPARACIÓN',480,65);
+      ctx.fillStyle='#fff'; ctx.font='bold 19px system-ui'; ctx.fillText(`Combate en ${Math.ceil(preparationRemaining)} s`,480,88);
+    }
+    if (gameOver) {
+      ctx.fillStyle='rgba(8,15,18,.8)';ctx.fillRect(230,245,500,95);ctx.strokeStyle='#f0c75e';ctx.strokeRect(230,245,500,95);
+      ctx.fillStyle='#fff';ctx.textAlign='center';ctx.font='bold 25px system-ui';ctx.fillText(buildings.some(b=>b.side===playerSide()&&b.type==='hq')?'VICTORIA':'DERROTA',480,286);ctx.font='14px system-ui';ctx.fillText('Pulsa “Volver a configuración” para iniciar otra partida.',480,315);
+    }
+    updateControls();
+  }
+  function frame(timestamp) {
+    const dt=lastFrame ? Math.min((timestamp-lastFrame)/1000,.05) : 0;
+    lastFrame=timestamp; update(dt); render(); requestAnimationFrame(frame);
+  }
+
+  canvas.addEventListener('click',onCanvasClick);
+  canvas.addEventListener('contextmenu',onCanvasContext);
+  canvas.addEventListener('mousedown', event => {
+    if (event.button !== 0 || !started || gameOver || commandMode || constructionMode) return;
+    const point = canvasPoint(event);
+    dragSelection = { active: true, moved: false, startX: point.x, startY: point.y, x: point.x, y: point.y };
+  });
+  window.addEventListener('mousemove', event => {
+    const point = canvasPoint(event); pointer = point;
+    if (dragSelection.active) {
+      dragSelection.x = point.x; dragSelection.y = point.y;
+      if (Math.hypot(point.x-dragSelection.startX, point.y-dragSelection.startY) >= 6) dragSelection.moved = true;
+      if (dragSelection.moved) render();
+    }
+  });
+  window.addEventListener('mouseup', event => {
+    if (!dragSelection.active) return;
+    const point = canvasPoint(event); dragSelection.x = point.x; dragSelection.y = point.y;
+    if (Math.hypot(point.x-dragSelection.startX, point.y-dragSelection.startY) >= 6) dragSelection.moved = true;
+    const completed = { ...dragSelection };
+    dragSelection.active = false;
+    if (completed.moved && started && !gameOver) {
+      suppressNextClick = true;
+      window.setTimeout(() => { suppressNextClick = false; }, 250);
+      selectUnitsInRectangle(completed.startX, completed.startY, completed.x, completed.y);
+      render();
+    }
+  });
+  document.addEventListener('keydown',event=>{
+    if(event.key==='Escape'){
+      commandMode=null;constructionMode=null;
+      for (const unit of getSelectedPlayerUnits()) unit.order={type:'idle'};
+      setAction('Modo u orden cancelado.');updateControls();render();
+    }
+  });
+  el('blueChoice').addEventListener('click',()=>chooseColor('blue'));
+  el('redChoice').addEventListener('click',()=>chooseColor('red'));
+  el('startButton').addEventListener('click',()=>{if(started) returnToSetup();else initializeGame();render();});
+  el('moveButton').addEventListener('click',()=>{if(!getSelectedPlayerUnits().length)return;commandMode='move';constructionMode=null;setAction('Modo movimiento: haz clic en el destino del grupo.');updateControls();});
+  el('attackButton').addEventListener('click',()=>{if(preparing){setAction('El ataque estará disponible cuando termine la preparación.');return;}if(!getSelectedPlayerUnits().length)return;commandMode='attack';constructionMode=null;setAction('Modo ataque: haz clic en una unidad o edificio enemigo.');updateControls();});
+  el('cancelButton').addEventListener('click',()=>{commandMode=null;constructionMode=null;for(const unit of getSelectedPlayerUnits())unit.order={type:'idle'};setAction('Orden o modo cancelado.');updateControls();render();});
+  el('soldierButton').addEventListener('click',()=>{if(selected&&selected.side===playerSide())beginProduction(selected,'soldier',playerSide());updateControls();render();});
+  el('tankButton').addEventListener('click',()=>{if(selected&&selected.side===playerSide())beginProduction(selected,'tank',playerSide());updateControls();render();});
+  el('buildBarracksButton').addEventListener('click',()=>beginConstruction('barracks'));
+  el('buildFactoryButton').addEventListener('click',()=>beginConstruction('factory'));
+
+  // Dibujo previo: solo geometría para que la selección de color sea visible antes de empezar.
+  render();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
