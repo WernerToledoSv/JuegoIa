@@ -19,6 +19,7 @@
   .row{display:flex;gap:8px}.row>*{flex:1}.swatches{display:flex;gap:9px}.swatch{height:30px;border:2px solid #dce5e8;border-radius:3px;flex:1;cursor:pointer}.swatch[aria-pressed="true"]{outline:3px solid var(--accent);outline-offset:2px}
   .small{color:var(--muted);font-size:12px}.status{font-weight:700;color:#b9f0b1;min-height:20px}#selection{min-height:42px}#actionLog{min-height:78px;max-height:160px;overflow:auto;padding:8px;background:#101920;border:1px solid #354a54;color:#d6e5e8;font-size:12px}
   .logline{padding:2px 0;border-bottom:1px solid #24343b}.logline:last-child{border-bottom:0}.cost{float:right;color:var(--accent)}
+  .queue-count{font-size:12px;font-weight:700;color:var(--accent);margin-top:5px;padding:5px 7px;background:#101920;border:1px solid #354a54;border-bottom:0}
   @media(max-width:900px){main{grid-template-columns:1fr}aside{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr))}}
 </style>
 </head>
@@ -59,9 +60,13 @@
     </section>
     <section class="panel">
       <h2>Producción</h2>
-      <button id="soldierButton">Producir soldado <span class="cost">300 cr</span></button>
-      <button id="tankButton">Producir tanque <span class="cost">700 cr</span></button>
-      <p class="small">Selecciona un cuartel para entrenar soldados o una fábrica para producir tanques. La producción tarda unos segundos.</p>
+      <label for="productionAmount" class="small">Unidades que quieres añadir a la cola</label>
+      <input id="productionAmount" type="number" min="1" max="50" value="1" style="width:100%;padding:8px;margin:4px 0 8px;background:#101920;color:var(--text);border:1px solid var(--line);border-radius:3px">
+      <div class="queue-count" id="soldierQueueCount" aria-live="polite">En cola: 0</div>
+      <button id="soldierButton">Añadir soldados <span class="cost">300 cr c/u</span></button>
+      <div class="queue-count" id="tankQueueCount" aria-live="polite">En cola: 0</div>
+      <button id="tankButton">Añadir tanques <span class="cost">700 cr c/u</span></button>
+      <p class="small" id="productionStatus">Selecciona un cuartel para entrenar soldados o una fábrica para producir tanques. Si faltan créditos, la cola se pausará y continuará cuando haya fondos.</p>
     </section>
     <section class="panel">
       <h2>Construcción</h2>
@@ -155,7 +160,7 @@
   function createBuilding(side, type, x, y) {
     const def = BUILDING_DATA[type];
     const building = { id: nextId++, kind: 'building', side, type, x, y, w: def.w, h: def.h,
-      hp: def.hp, maxHp: def.hp, production: null, selected: false };
+      hp: def.hp, maxHp: def.hp, production: null, productionQueue: [], selected: false };
     buildings.push(building);
     return building;
   }
@@ -218,8 +223,14 @@
     const ownBuilding = selected && selected.kind === 'building' && selected.side === playerSide();
     const canSoldier = ownBuilding && selected.type === 'barracks';
     const canTank = ownBuilding && selected.type === 'factory';
-    el('soldierButton').disabled = !started || gameOver || !canSoldier || !!(selected && selected.production);
-    el('tankButton').disabled = !started || gameOver || !canTank || !!(selected && selected.production);
+    el('soldierButton').disabled = !started || gameOver || !canSoldier;
+    el('tankButton').disabled = !started || gameOver || !canTank;
+    const selectedBuilding = selected && selected.kind === 'building' && selected.side === playerSide() ? selected : null;
+    const soldierCount = selectedBuilding && selectedBuilding.type === 'barracks' ? (selectedBuilding.production && !selectedBuilding.production.paused ? 1 : 0) + (selectedBuilding.productionQueue || []).length : 0;
+    const tankCount = selectedBuilding && selectedBuilding.type === 'factory' ? (selectedBuilding.production && !selectedBuilding.production.paused ? 1 : 0) + (selectedBuilding.productionQueue || []).length : 0;
+    el('soldierQueueCount').textContent = `En cola: ${soldierCount}`;
+    el('tankQueueCount').textContent = `En cola: ${tankCount}`;
+    el('productionStatus').textContent = selectedBuilding && ['barracks','factory'].includes(selectedBuilding.type) ? (selectedBuilding.production && selectedBuilding.production.paused ? `Producción pausada: faltan créditos. Se reanudará al tener ${UNIT_COST[selectedBuilding.type === 'barracks' ? 'soldier' : 'tank']} cr.` : `Edificio seleccionado: ${BUILDING_DATA[selectedBuilding.type].name}. Los créditos se descuentan al iniciar cada unidad.`) : 'Selecciona un cuartel para soldados o una fábrica para tanques.';
     el('moveButton').disabled = !started || gameOver || selectedUnits.length === 0;
     el('attackButton').disabled = !started || preparing || gameOver || selectedUnits.length === 0;
     el('cancelButton').disabled = !started || gameOver || (!commandMode && !constructionMode && !selectedUnits.some(u => u.order.type !== 'idle'));
@@ -246,14 +257,14 @@
       el('selection').textContent = `${selected.side === playerSide() ? 'Tu' : 'Unidad enemiga'}: ${UNIT_DATA[selected.type].name} · Vida ${Math.max(0, Math.ceil(selected.hp))}/${selected.maxHp}`;
       el('selectionHint').textContent = selected.side === playerSide() ? orderDescription(selected) : 'Unidad controlada por el enemigo.';
     } else {
-      const prod = selected.production ? ` · Produciendo: ${UNIT_DATA[selected.production.type].name} (${Math.ceil(selected.production.remaining)} s)` : '';
+      const prod = selected.production ? (selected.production.paused ? ` · Cola pausada por falta de créditos (${(selected.productionQueue || []).length} en cola)` : ` · Produciendo: ${UNIT_DATA[selected.production.type].name} (${Math.ceil(selected.production.remaining)} s) · En cola: ${(selected.productionQueue || []).length + 1}`) : ((selected.productionQueue || []).length ? ` · En cola: ${selected.productionQueue.length}` : '');
       el('selection').textContent = `${selected.side === playerSide() ? 'Tu' : 'Enemigo'}: ${BUILDING_DATA[selected.type].name} · Vida ${Math.max(0, Math.ceil(selected.hp))}/${selected.maxHp}${prod}`;
       el('selectionHint').textContent = selected.type === 'barracks' ? 'El cuartel entrena soldados.' : selected.type === 'factory' ? 'La fábrica produce tanques.' : 'La base central es el objetivo principal.';
     }
     el('playerCredits').textContent = Math.floor(playerCredits).toString();
     el('enemyCredits').textContent = Math.floor(enemyCredits).toString();
     el('unitCount').textContent = units.filter(u => u.side === playerSide()).length.toString();
-    el('gameState').textContent = !started ? 'Configuración' : gameOver ? (buildings.some(b => b.side === playerSide() && b.type === 'hq' && b.hp > 0) ? 'Victoria' : 'Derrota') : preparing ? 'Preparación' : 'En marcha';
+    el('gameState').textContent = !started ? 'Configuración' : gameOver ? (buildings.some(b => b.side === enemySide()) ? 'Derrota' : 'Victoria') : preparing ? 'Preparación' : 'En marcha';
   }
   function getSelectedPlayerUnits() {
     return selectedGroup.filter(u => u && u.kind === 'unit' && u.side === playerSide() && u.hp > 0 && units.some(live => live.id === u.id));
@@ -296,24 +307,46 @@
     setAction(message); addLog(message); commandMode = null; constructionMode = null; updateControls();
   }
   function displayName(o) { return o.kind === 'unit' ? UNIT_DATA[o.type].name.toLowerCase() : BUILDING_DATA[o.type].name.toLowerCase(); }
-  function beginProduction(building, type, side) {
-    if (!building || building.kind !== 'building' || building.type !== (type === 'soldier' ? 'barracks' : 'factory')) return;
-    if (building.production) {
-      if (side === playerSide()) { setAction('Este edificio ya está produciendo una unidad.'); addLog('Producción rechazada: el edificio está ocupado.'); }
-      return;
-    }
+  function startNextProduction(building, side) {
+    if (!building || building.hp <= 0 || building.production || !building.productionQueue || !building.productionQueue.length) return;
+    const type = building.productionQueue[0];
     const cost = UNIT_COST[type];
     if (credits(side) < cost) {
+      building.production = { type, remaining: 0, total: UNIT_DATA[type].trainTime, paused: true };
       if (side === playerSide()) {
-        const message = `Créditos insuficientes para producir ${UNIT_DATA[type].name.toLowerCase()}: necesitas ${cost} y tienes ${Math.floor(playerCredits)}.`;
-        setAction(message); addLog(message);
+        const message = `Cola pausada: necesitas ${cost} créditos para el siguiente ${UNIT_DATA[type].name.toLowerCase()}.`;
+        setAction(message);
       }
-      updateControls(); return;
+      return;
     }
+    building.productionQueue.shift();
     setCredits(side, credits(side) - cost);
-    building.production = { type, remaining: UNIT_DATA[type].trainTime, total: UNIT_DATA[type].trainTime };
-    const message = `Construyendo ${type === 'tank' ? 'tanque' : 'soldado'}${side === enemySide() ? ' (enemigo)' : ''}.`;
-    if (side === playerSide()) { setAction(message); addLog(`${message} Coste: ${cost} créditos.`); }
+    building.production = { type, remaining: UNIT_DATA[type].trainTime, total: UNIT_DATA[type].trainTime, paused: false };
+    if (side === playerSide()) {
+      setAction(`Fabricando ${UNIT_DATA[type].name.toLowerCase()}. Coste descontado: ${cost} créditos.`);
+      addLog(`Producción iniciada: ${UNIT_DATA[type].name.toLowerCase()} (${cost} créditos).`);
+    }
+  }
+  function beginProduction(building, type, side, amount = 1) {
+    if (!building || building.kind !== 'building' || building.hp <= 0 || building.type !== (type === 'soldier' ? 'barracks' : 'factory')) return;
+    amount = Math.max(1, Math.min(50, Math.floor(Number(amount) || 1)));
+    building.productionQueue = building.productionQueue || [];
+    const current = building.production && !building.production.paused ? 1 : 0;
+    const availableSlots = Math.max(0, 50 - building.productionQueue.length - current);
+    amount = Math.min(amount, availableSlots);
+    if (amount <= 0) {
+      if (side === playerSide()) setAction('La cola ya alcanzó el máximo de 50 unidades.');
+      return;
+    }
+    for (let i = 0; i < amount; i++) building.productionQueue.push(type);
+    if (building.production && building.production.paused) building.production = null;
+    startNextProduction(building, side);
+    if (side === playerSide()) {
+      const queued = building.productionQueue.length + (building.production ? 1 : 0);
+      setAction(`Añadidas ${amount} unidad(es) a la cola. Pendientes: ${queued}.`);
+      addLog(`Cola de ${UNIT_DATA[type].name.toLowerCase()}: +${amount}.`);
+    }
+    updateControls();
   }
   function beginConstruction(type) {
     if (!started || gameOver) return;
@@ -428,20 +461,28 @@
     while (incomeAccumulator >= 1) {
       playerCredits += INCOME_PER_SECOND; enemyCredits += INCOME_PER_SECOND; incomeAccumulator -= 1;
     }
-    // Producción temporizada de ambos bandos.
+    // Producción temporizada: las colas se pausan si no hay créditos y se reanudan automáticamente.
     for (const b of buildings) {
-      if (!b.production || b.hp <= 0) continue;
+      if (b.hp <= 0) continue;
+      b.productionQueue = b.productionQueue || [];
+      if (b.production && b.production.paused) {
+        const type = b.production.type;
+        if (credits(b.side) >= UNIT_COST[type]) b.production = null;
+      }
+      if (!b.production) startNextProduction(b, b.side);
+      if (!b.production || b.production.paused) continue;
       b.production.remaining -= dt;
       if (b.production.remaining <= 0) {
         const type = b.production.type;
         const offset = b.side === playerSide() ? 1 : -1;
         const spawned = createUnit(b.side, type, b.x + offset*(b.w/2+25), b.y + b.h/2 + 17);
         if (b.side === enemySide()) {
-          const target = buildings.find(x => x.side === playerSide() && x.type === 'hq' && x.hp > 0);
+          const target = buildings.find(x => x.side === playerSide() && x.hp > 0);
           if (target) spawned.order = { type: 'attack', targetId: target.id };
         }
-        if (b.side === playerSide()) { setAction(`${UNIT_DATA[type].name} listo. ${type === 'tank' ? 'Tanque' : 'Soldado'} desplegado.`); addLog(`${UNIT_DATA[type].name} completado en ${BUILDING_DATA[b.type].name.toLowerCase()}.`); }
+        if (b.side === playerSide()) { setAction(`${UNIT_DATA[type].name} listo y desplegado.`); addLog(`${UNIT_DATA[type].name} completado en ${BUILDING_DATA[b.type].name.toLowerCase()}.`); }
         b.production = null;
+        startNextProduction(b, b.side);
       }
     }
     if (!preparing) {
@@ -482,12 +523,6 @@
           if (target.hp <= 0) {
             if (selected && selected.id===target.id) selectObject(null);
             addLog(`${sideName(u.side)} destruyó ${displayName(target)}.`);
-            if (target.kind==='building' && target.type==='hq') {
-              gameOver=true;
-              const won=u.side===playerSide();
-              setAction(won?'Victoria: destruiste la base central enemiga.':'Derrota: tu base central fue destruida.');
-              addLog(won?'Victoria.':'Derrota.');
-            }
           }
         }
       }
@@ -495,6 +530,19 @@
     }
     units = units.filter(u=>u.hp>0);
     buildings = buildings.filter(b=>b.hp>0);
+    if (!gameOver) {
+      const ownBuildings = buildings.filter(b => b.side === playerSide());
+      const enemyBuildings = buildings.filter(b => b.side === enemySide());
+      if (enemyBuildings.length === 0) {
+        gameOver = true;
+        setAction('¡Victoria! Destruiste todos los edificios enemigos.');
+        addLog('¡Victoria! No quedan edificios enemigos.');
+      } else if (ownBuildings.length === 0) {
+        gameOver = true;
+        setAction('Derrota: el enemigo destruyó todos tus edificios.');
+        addLog('Derrota: no quedan edificios propios.');
+      }
+    }
     if (selected && selected.kind === 'unit' && selected.side === playerSide()) {
       selectedGroup = selectedGroup.filter(u => units.some(live => live.id === u.id));
       selected = selectedGroup[0] || null;
@@ -618,7 +666,7 @@
     }
     if (gameOver) {
       ctx.fillStyle='rgba(8,15,18,.8)';ctx.fillRect(230,245,500,95);ctx.strokeStyle='#f0c75e';ctx.strokeRect(230,245,500,95);
-      ctx.fillStyle='#fff';ctx.textAlign='center';ctx.font='bold 25px system-ui';ctx.fillText(buildings.some(b=>b.side===playerSide()&&b.type==='hq')?'VICTORIA':'DERROTA',480,286);ctx.font='14px system-ui';ctx.fillText('Pulsa “Volver a configuración” para iniciar otra partida.',480,315);
+      ctx.fillStyle='#fff';ctx.textAlign='center';ctx.font='bold 25px system-ui';ctx.fillText(buildings.some(b=>b.side===enemySide())?'DERROTA':'VICTORIA',480,286);ctx.font='14px system-ui';ctx.fillText('Pulsa “Volver a configuración” para iniciar otra partida.',480,315);
     }
     updateControls();
   }
@@ -668,8 +716,8 @@
   el('moveButton').addEventListener('click',()=>{if(!getSelectedPlayerUnits().length)return;commandMode='move';constructionMode=null;setAction('Modo movimiento: haz clic en el destino del grupo.');updateControls();});
   el('attackButton').addEventListener('click',()=>{if(preparing){setAction('El ataque estará disponible cuando termine la preparación.');return;}if(!getSelectedPlayerUnits().length)return;commandMode='attack';constructionMode=null;setAction('Modo ataque: haz clic en una unidad o edificio enemigo.');updateControls();});
   el('cancelButton').addEventListener('click',()=>{commandMode=null;constructionMode=null;for(const unit of getSelectedPlayerUnits())unit.order={type:'idle'};setAction('Orden o modo cancelado.');updateControls();render();});
-  el('soldierButton').addEventListener('click',()=>{if(selected&&selected.side===playerSide())beginProduction(selected,'soldier',playerSide());updateControls();render();});
-  el('tankButton').addEventListener('click',()=>{if(selected&&selected.side===playerSide())beginProduction(selected,'tank',playerSide());updateControls();render();});
+  el('soldierButton').addEventListener('click',()=>{if(selected&&selected.side===playerSide())beginProduction(selected,'soldier',playerSide(),el('productionAmount').value);updateControls();render();});
+  el('tankButton').addEventListener('click',()=>{if(selected&&selected.side===playerSide())beginProduction(selected,'tank',playerSide(),el('productionAmount').value);updateControls();render();});
   el('buildBarracksButton').addEventListener('click',()=>beginConstruction('barracks'));
   el('buildFactoryButton').addEventListener('click',()=>beginConstruction('factory'));
 

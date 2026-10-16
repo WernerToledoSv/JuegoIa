@@ -38,3 +38,12 @@ mini-rts-prototipo/
 - **Acciones y combate:** el panel muestra la acción actual y el registro conserva las últimas acciones. Las unidades se mueven, persiguen objetivos y aplican daño; el enemigo produce unidades y las envía hacia la base del jugador una vez iniciado el combate. La partida termina cuando una base central es destruida.
 
 Es un prototipo jugable enfocado en la prueba de mecánicas, no una reproducción exacta de Red Alert.
+
+
+## Novedades de producción y victoria
+
+- Puedes indicar cuántas unidades añadir a la cola (de 1 a 50) desde el panel Producción.
+- Cada botón muestra el número de unidades en cola para el edificio seleccionado.
+- Los créditos se descuentan al iniciar cada unidad, no al añadirla a la cola.
+- Si no hay créditos suficientes, la producción se pausa automáticamente y se reanuda cuando los ingresos permitan pagar la siguiente unidad.
+- Para ganar debes destruir todos los edificios enemigos. Pierdes cuando el enemigo destruye todos tus edificios.
