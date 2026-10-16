@@ -238,8 +238,8 @@
     el('soldierButton').disabled = !started || gameOver || !canSoldier;
     el('tankButton').disabled = !started || gameOver || !canTank;
     const selectedBuilding = selected && selected.kind === 'building' && selected.side === playerSide() ? selected : null;
-    const soldierCount = selectedBuilding && selectedBuilding.type === 'barracks' ? (selectedBuilding.production && !selectedBuilding.production.paused ? 1 : 0) + (selectedBuilding.productionQueue || []).length : 0;
-    const tankCount = selectedBuilding && selectedBuilding.type === 'factory' ? (selectedBuilding.production && !selectedBuilding.production.paused ? 1 : 0) + (selectedBuilding.productionQueue || []).length : 0;
+    const soldierCount = selectedBuilding && selectedBuilding.type === 'barracks' ? (selectedBuilding.production ? 1 : 0) + (selectedBuilding.productionQueue || []).length : 0;
+    const tankCount = selectedBuilding && selectedBuilding.type === 'factory' ? (selectedBuilding.production ? 1 : 0) + (selectedBuilding.productionQueue || []).length : 0;
     el('soldierQueueCount').textContent = `En cola: ${soldierCount}`;
     el('tankQueueCount').textContent = `En cola: ${tankCount}`;
     el('productionStatus').textContent = selectedBuilding && ['barracks','factory'].includes(selectedBuilding.type) ? (selectedBuilding.production && selectedBuilding.production.paused ? `Producción pausada: faltan créditos. Se reanudará al tener ${UNIT_COST[selectedBuilding.type === 'barracks' ? 'soldier' : 'tank']} cr.` : `Edificio seleccionado: ${BUILDING_DATA[selectedBuilding.type].name}. Los créditos se descuentan al iniciar cada unidad.`) : 'Selecciona un cuartel para soldados o una fábrica para tanques.';
