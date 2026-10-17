@@ -2,13 +2,13 @@
 
 Juego de estrategia 2D en un solo archivo HTML, desarrollado con Canvas y JavaScript puro.
 
-## Cómo ejecutarlo
+## Jugar en línea
 
-1. Descarga o clona este repositorio.
-2. Abre `index.html` en un navegador moderno (Firefox, Chrome, Edge, etc.).
-3. Elige el bando azul o rojo y pulsa **Comenzar partida**.
+Puedes jugar directamente desde el navegador, sin descargar archivos:
 
-No requiere instalación, servidor, librerías ni conexión a Internet.
+**[Abrir Mini RTS](https://wernertoledosv.github.io/JuegoIa/)**
+
+Si quieres revisar o modificar el código fuente, consulta `index.html` en este repositorio. El juego no requiere instalación ni librerías externas.
 
 ## Controles
 
